@@ -12,7 +12,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 logger = logging.getLogger(__name__)
 
-buffer = {'create': {}, 'delete': {}}
+buffer = {'create': {}, 'delete': {}, 'stop': {}}
 keyboards = {
     'default': [['STATUS'], ['LIST', 'ADD NEW']],
     'time_units': [['MINUTES', 'HOURS', 'DAYS'], ['CANCEL']],
@@ -25,7 +25,7 @@ Press ADD NEW to create new activity\n\n
 You will get notifications when activity expires'''
 
 (MAIN_MENU, STATUS, ADD_ACTIVITY_TIME, ADD_ACTIVITY_TIME_UNIT, ADD_ACTIVITY_TIME_DONE, START_ACTIVITY,
- CONFIRM_DELETE_ACTIVITY) = range(7)
+ CONFIRM_DELETE_ACTIVITY, STOP_ACTIVITY, CONFIRM_STOP_ACTIVITY) = range(9)
 
 
 def start(_, update):
@@ -46,6 +46,7 @@ def cancel(_, update):
 
     buffer['create'].update({update.message.from_user.id: []})
     buffer['delete'].update({update.message.from_user.id: None})
+    buffer['stop'].update({update.message.from_user.id: None})
     db.get_activities(update.message.from_user.id)
 
     update.message.reply_text(
@@ -59,21 +60,76 @@ def cancel(_, update):
 def status(_, update):
     global keyboards
 
-    running_activities = []
+    running_activities = db.get_running_activities(update.message.from_user.id)
+
+    if not running_activities:
+        update.message.reply_text(
+            'No running activities found',
+            reply_markup=ReplyKeyboardMarkup(keyboards['default'])
+        )
+
+        return MAIN_MENU
+    else:
+        update.message.reply_html(
+            'At this moment you have {0}{1}\n\n'.format(
+                len(running_activities), 'activity' if len(running_activities) == 1 else 'activities') + '\n'.join(
+                ['• {id} <b>{title}</b> ({unit} {amount}): {progress}% /stop{id}'.format(**x) for x in
+                 running_activities]),
+            reply_markup=ReplyKeyboardMarkup(keyboards['default'])
+        )
+
+        return STOP_ACTIVITY
+
+
+def stop_activity(_, update):
+    global keyboards
+
+    user_id = update.message.from_user.id
+    activity_id = update.message.text[5:]
+
+    if db.has_activity(user_id, activity_id):
+        update.message.reply_html(
+            'Are you sure that you wanna stop activity <b>{}</b>?'.format(
+                db.get_activity(user_id, activity_id).get('title')),
+            reply_markup=ReplyKeyboardMarkup(keyboards['confirm'])
+        )
+
+        buffer['stop'][update.message.from_user.id] = activity_id
+
+        return CONFIRM_STOP_ACTIVITY
+    else:
+        update.message.reply_text(
+            'Activity {} has been stopped'.format(activity_id),
+            reply_markup=ReplyKeyboardMarkup(keyboards['default'])
+        )
+
+        status(_, update)
+
+        return STOP_ACTIVITY
+
+
+def confirm_stop_activity(_, update):
+    global keyboards
+
+    db.stop_activity(update.message.from_user.id, buffer['stop'][update.message.from_user.id])
 
     update.message.reply_text(
-        'No running activities found' if not running_activities else 'At this moment you have {0}{1}'.format(
-            len(running_activities), 'activity' if len(running_activities) == 1 else 'activities'),
+        'Activity {} has been stopped'.format(buffer['stop'][update.message.from_user.id]),
         reply_markup=ReplyKeyboardMarkup(keyboards['default'])
     )
 
-    return MAIN_MENU
+    del buffer['stop'][update.message.from_user.id]
+
+    return status(_, update)
 
 
 def show_activities_list(update):
-    my_activities = db.get_activities(update.message.from_user.id)
+    user_id = update.message.from_user.id
 
-    activities = [['START {id} ({title})'.format(**x)] for x in my_activities]
+    my_activities = db.get_activities(user_id)
+
+    activities = [['START {id} ({title})'.format(**x)] for x in my_activities if
+                  not db.has_running_activity(user_id, x['id'])]
     activities.append(['CANCEL'])
 
     update.message.reply_html(
@@ -108,8 +164,8 @@ def delete_activity(_, update):
     activity_id = update.message.text[4:]
 
     if db.has_activity(user_id, activity_id):
-        update.message.reply_text(
-            'Are you sure that you wanna delete activity {}?'.format(
+        update.message.reply_html(
+            'Are you sure that you wanna delete activity <b>{}</b>?'.format(
                 db.get_activity(user_id, activity_id).get('title')),
             reply_markup=ReplyKeyboardMarkup(keyboards['confirm'])
         )
@@ -141,6 +197,20 @@ def confirm_delete_activity(_, update):
     del buffer['delete'][update.message.from_user.id]
 
     return activities_list(_, update)
+
+
+def start_activity(_, update):
+    global keyboards
+
+    activity_id = update.message.text.split(' ')[1]
+
+    db.start_activity(update.message.from_user.id, activity_id)
+
+    update.message.reply_text(
+        'Activity {} has been started'.format(activity_id)
+    )
+
+    return status(_, update)
 
 
 def activities_add(_, update):
@@ -252,7 +322,7 @@ def main():
         entry_points=[
             CommandHandler('start', start),
             CommandHandler('cancel', cancel),
-            RegexHandler('^CANCEL$', cancel)
+            MessageHandler(Filters.text, cancel)
         ],
 
         states={
@@ -265,11 +335,21 @@ def main():
             START_ACTIVITY: [
                 RegexHandler('^CANCEL$', cancel),
                 RegexHandler('^/del', delete_activity),
-                # RegexHandler('^START ', start_activity)
+                RegexHandler('^START ', start_activity)
             ],
             CONFIRM_DELETE_ACTIVITY: [
                 RegexHandler('^CANCEL$', activities_list),
                 RegexHandler('^CONFIRM$', confirm_delete_activity),
+            ],
+            STOP_ACTIVITY: [
+                RegexHandler('^STATUS$', status),
+                RegexHandler('^LIST$', activities_list),
+                RegexHandler('^ADD NEW$', activities_add),
+                RegexHandler('^/stop', stop_activity)
+            ],
+            CONFIRM_STOP_ACTIVITY: [
+                RegexHandler('^CANCEL$', status),
+                RegexHandler('^CONFIRM$', confirm_stop_activity),
             ],
             ADD_ACTIVITY_TIME_UNIT: [
                 RegexHandler('^CANCEL$', cancel),
