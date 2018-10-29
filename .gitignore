@@ -1,0 +1,4 @@
+venv
+.env
+
+.idea # because some smart people forget to add .idea to .git/info/exclude
