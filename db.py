@@ -1,30 +1,39 @@
 from datetime import datetime
-from math import ceil
 
-temp_activities = {}
-running_activities = {}
+from models import User, Activity, RunningActivity
 
 
-def get_running_activities(user_id):
-    global running_activities
+def find_user_or_create(from_user):
+    user = User.select().where(User.telegram_id == from_user.id)
 
-    def calculate_progress(started_at, target_time, **_):
-        return ceil((datetime.utcnow() - started_at).seconds / target_time * 100)
+    if not user.exists():
+        user = User.create(telegram_id=from_user.id, username=from_user.username)
+    else:
+        user = user.get()
 
-    if not running_activities.get(user_id):
-        running_activities[user_id] = []
-
-    return [{**x, 'progress': calculate_progress(**x)} for x in
-            running_activities.get(user_id) if x['started_at'] < datetime.utcnow()]
+    return user
 
 
-def has_running_activity(user_id, activity_id):
-    return activity_id in [x['id'] for x in get_running_activities(user_id)]
+def get_running_activities(from_user):
+    running_activities = RunningActivity.select().join(User).where(User.telegram_id == from_user.id,
+                                                                   RunningActivity.started_at < datetime.now())
+
+    return [] if not running_activities.exists() else list(running_activities)
 
 
-def start_activity(user_id, activity_id):
-    global running_activities
+def get_running_activity(from_user, activity_id):
+    return RunningActivity.select().join(User).where(User.telegram_id == from_user.id,
+                                                     RunningActivity.started_at < datetime.now(),
+                                                     RunningActivity.activity_id == activity_id).get()
 
+
+def has_running_activity(from_user, activity_id):
+    return RunningActivity.select().join(User).where(User.telegram_id == from_user.id,
+                                                     RunningActivity.started_at < datetime.now(),
+                                                     RunningActivity.activity_id == activity_id).exists()
+
+
+def start_activity(from_user, activity_id):
     def convert_unit_to_seconds(unit):
         if unit == 'MINUTES':
             return 60
@@ -35,53 +44,47 @@ def start_activity(user_id, activity_id):
         else:
             raise RuntimeError('Unknown unit {}'.format(unit))
 
-    if activity_id in [x['id'] for x in get_running_activities(user_id)]:
+    if has_running_activity(from_user, activity_id):
         return
 
-    activity = get_activity(user_id, activity_id)
-    target_time = activity['amount'] * convert_unit_to_seconds(activity['unit'])
+    activity = get_activity(from_user, activity_id)
+    total_time = activity.amount * convert_unit_to_seconds(activity.unit)
 
-    running_activities[user_id].append(
-        {**activity, 'started_at': datetime.utcnow(), 'target_time': target_time})
+    RunningActivity.create(activity_id=activity_id, title=activity.title, unit=activity.unit, amount=activity.amount,
+                           user=activity.user, started_at=datetime.utcnow(), total_time=total_time)
 
 
-def stop_activity(user_id, activity_id):
-    global running_activities
-
-    if activity_id not in [x['id'] for x in get_running_activities(user_id)]:
+def stop_activity(from_user, activity_id):
+    if not has_running_activity(from_user, activity_id):
         return
 
-    running_activities[user_id] = [x for x in get_running_activities(user_id) if x['id'] != activity_id]
+    get_running_activity(from_user, activity_id).delete_instance()
 
 
-def get_activities(user_id):
-    global temp_activities
+def get_activities(from_user):
+    activities = Activity.select().join(User).where(User.telegram_id == from_user.id)
 
-    if not temp_activities.get(user_id):
-        temp_activities[user_id] = []
-
-    return temp_activities.get(user_id)
+    return activities.dicts()
 
 
-def add_activity(user_id, activity):
-    global temp_activities
-
-    temp_activities[user_id].append(activity)
+def add_activity(from_user, activity):
+    Activity.create(user=find_user_or_create(from_user), **activity)
 
 
-def get_activity(user_id, activity_id):
-    global temp_activities
+def get_activity(from_user, activity_id):
+    activity = Activity.select().join(User).where(User.telegram_id == from_user.id, Activity.activity_id == activity_id)
 
-    return [x for x in temp_activities[user_id] if x['id'] == activity_id][0]
+    if not activity.exists():
+        return None
 
-
-def has_activity(user_id, activity_id):
-    global temp_activities
-
-    return len([x for x in temp_activities[user_id] if x['id'] == activity_id]) != 0
+    return activity.get()
 
 
-def delete_activity(user_id, activity_id):
-    global temp_activities
+def has_activity(from_user, activity_id):
+    return get_activity(from_user, activity_id) is not None
 
-    temp_activities[user_id] = [x for x in temp_activities[user_id] if x['id'] != activity_id]
+
+def delete_activity(from_user, activity_id):
+    activity = get_activity(from_user, activity_id)
+
+    activity.delete_instance()
