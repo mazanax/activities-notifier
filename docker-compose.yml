@@ -9,15 +9,6 @@ services:
     links:
       - postgres
     command: "python bot.py"
-#  worker:
-#    build:
-#      dockerfile: ./docker/Dockerfile
-#      context: .
-#    container_name: 'bot_worker'
-#    restart: always
-#    links:
-#      - postgres
-#    command: "python worker.py"
   postgres:
     image: postgres:latest
     container_name: 'bot_db'

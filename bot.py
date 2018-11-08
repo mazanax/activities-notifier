@@ -1,5 +1,6 @@
 import logging
 import secrets
+from datetime import datetime
 
 from playhouse.shortcuts import model_to_dict
 from telegram import ReplyKeyboardMarkup
@@ -74,11 +75,11 @@ def status(_, update):
         return MAIN_MENU
     else:
         update.message.reply_html(
-            'At this moment you have {0}{1}\n\n'.format(
+            'At this moment you have {0} {1}\n\n'.format(
                 len(running_activities), 'activity' if len(running_activities) == 1 else 'activities') + '\n'.join(
                 ['• {activity_id} <b>{title}</b> ({unit} {amount}): {progress}% /stop{activity_id}'.format(
                     progress=x.progress, **model_to_dict(x))
-                 for x in running_activities]),
+                    for x in running_activities]),
             reply_markup=ReplyKeyboardMarkup(keyboards['default'], one_time_keyboard=True, resize_keyboard=True)
         )
 
@@ -314,6 +315,19 @@ def activities_add_done(_, update):
     return MAIN_MENU
 
 
+def check_running_activities(bot, _):
+    running_activities = db.get_all_running_activities()
+
+    for activity in running_activities:
+        if activity.finished and not activity.notified_at:
+            activity.notified_at = datetime.utcnow()
+            activity.save()
+
+            bot.send_message(chat_id=activity.user.telegram_id,
+                             text='Activity {activity_id} ({title}) has been finished!'.format(
+                                 **model_to_dict(activity)))
+
+
 def error(_, update, error_):
     """Log Errors caused by Updates."""
     logger.warning('Update "%s" caused error "%s"', update, error_)
@@ -385,7 +399,10 @@ def main():
     dp.add_handler(conversation_handler)
     dp.add_error_handler(error)
 
+    queue = updater.job_queue
+
     updater.start_polling()
+    queue.run_repeating(check_running_activities, interval=30, first=0)
     updater.idle()
 
 

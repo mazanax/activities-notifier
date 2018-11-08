@@ -18,8 +18,7 @@ POSTGRES_PORT=5432
 ```
 API_TOKEN=1488:U3VwZXItUHVwZXItU2VjcmV0LVRva2VuLU9mLVlvdXItQm90
 ```
-5. Run `bot.py`
-6. Run `worker.py` (not implemented yet)
+5. Run `docker-compose up --build`
 7. Go to your bot and type `/start`
 
 ## Scheme of telegram bot

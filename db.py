@@ -16,20 +16,27 @@ def find_user_or_create(from_user):
 
 def get_running_activities(from_user):
     running_activities = RunningActivity.select().join(User).where(User.telegram_id == from_user.id,
+                                                                   RunningActivity.notified_at.is_null(),
                                                                    RunningActivity.started_at < datetime.now())
+
+    return [] if not running_activities.exists() else list(running_activities)
+
+
+def get_all_running_activities():
+    running_activities = RunningActivity.select().where(RunningActivity.notified_at.is_null())
 
     return [] if not running_activities.exists() else list(running_activities)
 
 
 def get_running_activity(from_user, activity_id):
     return RunningActivity.select().join(User).where(User.telegram_id == from_user.id,
-                                                     RunningActivity.started_at < datetime.now(),
+                                                     RunningActivity.notified_at.is_null(),
                                                      RunningActivity.activity_id == activity_id).get()
 
 
 def has_running_activity(from_user, activity_id):
     return RunningActivity.select().join(User).where(User.telegram_id == from_user.id,
-                                                     RunningActivity.started_at < datetime.now(),
+                                                     RunningActivity.notified_at.is_null(),
                                                      RunningActivity.activity_id == activity_id).exists()
 
 

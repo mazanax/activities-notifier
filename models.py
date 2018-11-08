@@ -33,7 +33,12 @@ class Activity(Model):
 
 class RunningActivity(Activity):
     started_at = DateTimeField(default=datetime.now)
+    notified_at = DateTimeField(default=None, null=True)
     total_time = IntegerField()
+
+    @property
+    def finished(self):
+        return (datetime.utcnow() - self.started_at).seconds >= self.total_time
 
     @property
     def progress(self):
